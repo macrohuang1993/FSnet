@@ -12,13 +12,13 @@ def read_lytroLF_as5D(file_path,lfsize):
     Read raw lytro format light field.png file and format it into shape of 3,H,W,nv,nu.
     Note here the lfsize nv and nu may specifys a subregion of the entire aperture
     """
-    img = Image.open(file_path)
-    #Following step is bottlenecking the training. The image.read is slow 
-    LF = np.asarray(img)[:lfsize[0]*14,:lfsize[1]*14,:3] #H*nv,W*nu,3. AFter removing the 4th transparency channel, and possibly cropping the H,W
-    LF = LF.reshape([lfsize[0],14,lfsize[1],14,3]).transpose([4,0,2,1,3]) #3,H,W,nv,nu
-    LF = LF[:, :, :, (14//2)-(lfsize[2]//2):(14//2)+(lfsize[2]//2), (14//2)-(lfsize[3]//2):(14//2)+(lfsize[3]//2)] #only around central region of entire aperture, since its blank around border of the aperture
-
-    return LF
+    with open(file_path, 'rb') as f:
+        img = Image.open(f)
+        #Following step is bottlenecking the training. The image.read is slow 
+        LF = np.asarray(img)[:lfsize[0]*14,:lfsize[1]*14,:3] #H*nv,W*nu,3. AFter removing the 4th transparency channel, and possibly cropping the H,W
+        LF = LF.reshape([lfsize[0],14,lfsize[1],14,3]).transpose([4,0,2,1,3]) #3,H,W,nv,nu
+        LF = LF[:, :, :, (14//2)-(lfsize[2]//2):(14//2)+(lfsize[2]//2), (14//2)-(lfsize[3]//2):(14//2)+(lfsize[3]//2)] #only around central region of entire aperture, since its blank around border of the aperture
+        return LF
 
 def read_lytroLF_as5D_fromh5(h5_path,LF_name,lfsize):
     """
