@@ -123,3 +123,15 @@ class my_normalize(object):
         tensor=torch.from_numpy(nparray).to(torch.float32)
         tensor = tensor.div(self.normf)
         return tensor
+    
+class my_gamma_correction(object):
+    """
+    Apply random gamma agumentation to the image. 
+    Input: torch tensor normalized to range [0,1]
+    """
+    def __init__(self,gamma_min,gamma_max):
+        self.gamma_range = [gamma_min,gamma_max]
+    def __call__(self,tensor):
+        gam = np.random.uniform(low=self.gamma_range[0],high = self.gamma_range[1])
+        return torch.pow(tensor,gam)
+    

@@ -132,12 +132,17 @@ class unet_FS2LF_v1(nn.Module):
         return LF_rgb
     
 class unet_FS2LF_v2(nn.Module):
-    def __init__(self,nF=None,nu=None,nv=None):
+    def __init__(self,nF=None,nu=None,nv=None, box_constraint = None):
+        """
+        box_constraint:whether constrain the output value to [0,1],  using either 'tanh' or 'sigmoid'. If box_constraint = None, nothing done. 
+        """
         super(unet_FS2LF_v2,self).__init__()
         self.nu,self.nv = nu,nv
+        self. box_constraint = box_constraint
         self.unet_r = unet(nF,nu*nv)
         self.unet_g = unet(nF,nu*nv)
         self.unet_b = unet(nF,nu*nv)
+
     def forward(self,FS_rgb):
         """
         Foward passing each color channel of the FS to get reconLF using three separate single color Unet, treating the nF dimension of FS as the color channel in the unet.
@@ -150,13 +155,22 @@ class unet_FS2LF_v2(nn.Module):
         FS_r,FS_g,FS_b = FS_rgb[:,0],FS_rgb[:,1],FS_rgb[:,2]
         LF_r,LF_g,LF_b = self.unet_r(FS_r),self.unet_g(FS_g),self.unet_b(FS_b) # LF_r has shape B,nu*nv,H,W
         LF_rgb = torch.stack([torch.unsqueeze(LF_r, 1),torch.unsqueeze(LF_g, 1),torch.unsqueeze(LF_b, 1)],dim = 1) #LF_rgb: B,C,nu*nv,H,W
+        if self.box_constraint == None:
+            pass
+        elif self.box_constraint == 'tanh':
+            LF_rgb = (F.tanh(LF_rgb) + torch.tensor(1).to(LF_rgb))/2
+        elif self.box_constraint == 'sigmoid':
+            LF_rgb = F.sigmoid(LF_rgb)
+        else: 
+            raise('Wrong box_constraint')
         LF_rgb = LF_rgb.view(B,C,self.nv,self.nu,H,W) #LF_rgb: B,C,nv,nu,H,W
         return LF_rgb
     
 class unet_FS2LF_v3(nn.Module):
-    def __init__(self,nF=None,nu=None,nv=None,C=3):
+    def __init__(self,nF=None,nu=None,nv=None,C=3, box_constraint = None):
         super(unet_FS2LF_v3,self).__init__()
         self.nu,self.nv = nu,nv
+        self. box_constraint = box_constraint
         self.unet = unet(C*nF,C*nu*nv)
 
     def forward(self,FS_rgb):
@@ -170,6 +184,14 @@ class unet_FS2LF_v3(nn.Module):
         B,C,nF,H,W = FS_rgb.shape
         FS_rgb = FS_rgb.view(B,C*nF,H,W)
         LF_rgb = self.unet(FS_rgb) #LF_rgb: B,C*nu*nv,H,W
+        if self.box_constraint == None:
+            pass
+        elif self.box_constraint == 'tanh':
+            LF_rgb = (F.tanh(LF_rgb) + torch.tensor(1).to(LF_rgb))/2
+        elif self.box_constraint == 'sigmoid':
+            LF_rgb = F.sigmoid(LF_rgb)
+        else: 
+            raise('Wrong box_constraint')
         LF_rgb = LF_rgb.view(B,C,self.nv,self.nu,H,W) #LF_rgb: B,C,nv,nu,H,W
         return LF_rgb        
     
