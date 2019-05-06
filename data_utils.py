@@ -64,11 +64,11 @@ class FSdataset(dset):
         FS = FS.transpose([1,0,2,3])  #since refocused images in h5 file generated from generate_FS has shape nF,C,H,W, the network expect C,nF,H,W
         
         f.close()
+        sample = {'FS':FS,'LF':LF}
         if self.transform is not None:
             # possible normalization and augmentation done here.
-            FS, LF = self.transform(FS), self.transform(LF)
-
-        return {'FS':FS,'LF':LF}
+            sample = self.transform(sample)
+        return sample
     
     
 class my_RandomCrop(object):
@@ -103,7 +103,6 @@ class my_RandomCrop(object):
         nDImage = nDImage[...,top: top + new_h,
                       left: left + new_w]
         return nDImage  #cropped in H,W dimension
-
     
 class my_normalize(object):
     """Normalize a tensor image by value normf.
@@ -135,3 +134,75 @@ class my_gamma_correction(object):
         gam = np.random.uniform(low=self.gamma_range[0],high = self.gamma_range[1])
         return torch.pow(tensor,gam)
     
+    
+class my_paired_RandomCrop(object):
+    """Crop randomly multidimensional input and target in last two dimensions.
+
+    Args:
+        output_size: (tuple (Hout,Wout) or int (Hout=Wout)): Desired output size. If int, square crop
+            is made.
+    """
+
+    def __init__(self, output_size):
+        assert isinstance(output_size, (int, tuple))
+        if isinstance(output_size, int):
+            self.output_size = (output_size, output_size)
+        else:
+            assert len(output_size) == 2
+            self.output_size = output_size
+
+    def __call__(self, sample):
+        """
+        sample: should be a dict of two item, of size (..., H,W)
+        return cropped input_target_pair, cropped in H,W dimension
+        """
+        
+        FS, LF = sample['FS'], sample['LF']
+        h, w = FS.shape[-2:]
+        h2,w2 = LF.shape[-2:]
+        assert h == h2 and w == w2
+        new_h, new_w = self.output_size
+
+        top = np.random.randint(0, h - new_h)
+        left = np.random.randint(0, w - new_w)
+
+        FS = FS[...,top: top + new_h,
+                      left: left + new_w]
+        LF = LF[...,top: top + new_h,
+                      left: left + new_w] 
+        return {'FS':FS,'LF':LF}  #cropped in H,W dimension
+    
+class my_paired_normalize(object):
+    """Normalize  input and target by value normf.
+    .. note::
+        This transform acts out of place by default, i.e., it does not mutates the input tensor.
+    See :class:`~torchvision.transforms.Normalize` for more details.
+    Args:
+        tensor (Tensor): Tensor image of size (C, H, W) to be normalized.
+        normf :
+
+    Returns:
+        Tensor: Normalized Tensor .
+    """
+    def __init__(self, normf):
+        self.normf = normf
+    def __call__(self,sample):
+        
+        FS, LF = sample['FS'], sample['LF'] 
+        
+        FS, LF = torch.from_numpy(FS).to(torch.float32),torch.from_numpy(LF).to(torch.float32),
+        FS, LF = FS.div(self.normf), LF.div(self.normf)
+        return {'FS':FS,'LF':LF}
+    
+class my_paired_gamma_correction(object):
+    """
+    Apply random gamma agumentation to the image. 
+    Input: dict of input and target (torch tensor)  normalized to range [0,1]
+    """
+    def __init__(self,gamma_min,gamma_max):
+        self.gamma_range = [gamma_min,gamma_max]
+    def __call__(self,sample):
+        FS, LF = sample['FS'], sample['LF'] 
+        gam = np.random.uniform(low=self.gamma_range[0],high = self.gamma_range[1])
+        FS, LF = torch.pow(FS,gam), torch.pow(LF,gam)
+        return {'FS':FS,'LF':LF}
