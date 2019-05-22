@@ -201,4 +201,186 @@ class unet_FS2LF_v3(nn.Module):
         
         
         
+class unet_FS2SAI_v3(nn.Module):
+    def __init__(self,nF=None,nu=None,nv=None,C=3, box_constraint = None):
+        super(unet_FS2SAI_v3,self).__init__()
+        self.nu,self.nv = nu,nv
+        self. box_constraint = box_constraint
+        self.unet = unet(C*nF,C)
+
+    def forward(self,FS_rgb):
+        """
+        Foward passing  FS to get SAI (all in focus image) using Unet, by merging the nF dimension of FS and the color dimension into the color channel in the unet.
+        This is called v3 since this has similar structure to unet FS2LF v3
+        Input:
+        FS_rgb: FS of shape B,C,nF,H,W
+        Output:
+        SAI: B,C,H,W
+        """
+        B,C,nF,H,W = FS_rgb.shape
+        FS_rgb = FS_rgb.view(B,C*nF,H,W)
+        SAI_rgb = self.unet(FS_rgb) #LF_rgb: B,C,H,W
+        if self.box_constraint == None:
+            pass
+        elif self.box_constraint == 'tanh':
+            SAI_rgb = (F.tanh(SAI_rgb) + torch.tensor(1).to(SAI_rgb))/2
+        elif self.box_constraint == 'sigmoid':
+            SAI_rgb = F.sigmoid(SAI_rgb)
+        else: 
+            raise('Wrong box_constraint')
+        return SAI_rgb     
     
+    
+
+
+class depth_network_pt(nn.Module):
+    """
+    Network for disparity field estimation from FS (and optionally estimated All in focus image), using dialated Convolution.
+    Input:
+        x:FS of shape B,C,nF,H,W
+        lfsize: lightfield size (H,W,nv,nu)
+        disp_mult: uplimit of the abs of the disparity. To be constrained by tanh
+        
+    Output:
+        disparity field of shape B,nv,nu,H,W
+    """
+    def __init__(self,nF, lfsize, disp_mult, concat_SAI = False):
+        super(depth_network_pt,self).__init__()
+        self.v_sz,self.u_sz = lfsize[2],lfsize[3]
+        self.disp_mult = disp_mult
+        self.concat_SAI = concat_SAI
+        if concat_SAI:
+            C = 3 * nF +3
+        else:
+            C = 3*nF
+        self.cnn_layers = nn.Sequential(
+            cnn_layer(C,16),#conv => BN => LeakyReLU
+            cnn_layer(16,64),
+            cnn_layer(64,128),
+            cnn_layer(128,128,dilation_rate = 2),
+            cnn_layer(128,128,dilation_rate = 4),
+            cnn_layer(128,128,dilation_rate = 8),
+            cnn_layer(128,128,dilation_rate = 16),
+            cnn_layer(128,128),
+            cnn_layer(128,self.v_sz*self.u_sz),
+            cnn_layer_plain(self.v_sz*self.u_sz, self.v_sz*self.u_sz)
+        )
+        self.tanh_NL = nn.Tanh()
+    def forward(self,x, *args):
+        B,C,nF,H,W = x.shape
+        x = x.reshape(B,C*nF,H,W)
+        if len(args) == 0:
+            pass
+        else:
+            assert len(args) == 1 and len(args[0].shape) == 4 ## check it is one 4D tensor (All in focus image)
+            SAI = args[0]
+            x = torch.cat([x,SAI], dim = 1) #concatenate FS and SAI along color channel
+        x = self.cnn_layers(x) # A series of convolution (some dilated)
+        x = self.disp_mult * self.tanh_NL(x) #constrain the output range
+        return x.reshape(B,self.v_sz,self.u_sz,H,W) #Estimated depth fields, B,v,u,H,W
+            
+        
+    
+class cnn_layer(nn.Module):
+    '''((possibly dilated)conv => BN => LeakyReLU), following learning Local_light field synthesis paper, used in depth_network_pt'''
+    def __init__(self, in_ch, out_ch,filter_size = 3, dilation_rate = 1):
+        super(cnn_layer, self).__init__()
+        self.conv = nn.Sequential(
+            nn.ReflectionPad2d(dilation_rate*(filter_size-1)//2),
+            nn.Conv2d(in_ch, out_ch, filter_size, padding=0,dilation = dilation_rate),
+            nn.BatchNorm2d(out_ch),
+            nn.LeakyReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+class cnn_layer_plain(nn.Module):
+    '''((possibly dilated)conv), following learning Local_light field synthesis paper, used in depth_network_pt'''
+
+    def __init__(self, in_ch, out_ch,filter_size = 3, dilation_rate = 1):
+        super(cnn_layer_plain, self).__init__()
+        self.conv = nn.Sequential(
+            nn.ReflectionPad2d(dilation_rate*(filter_size-1)//2),
+            nn.Conv2d(in_ch, out_ch, filter_size, padding=0,dilation = dilation_rate)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
+class refineNet(nn.Module):
+    """
+    Network for denoising DIBR lambertian LF, using residual network and  3D conv along H,W,uv dimension. 
+    Input:
+        x:DIBR Lambertian LF of shape B,C,v,u,H,W,
+        ray_depths: of shape B,v,u,H,W
+
+        
+    Output:
+        Denoised LF of shape B,C,v,u,H,W
+    """
+    def __init__(self,):
+        super(refineNet,self).__init__()
+        
+        # Takes in B,3+1,vu,H,W and output B,3,vu,H,W
+        self.cnn_layers = nn.Sequential(
+            cnn_layer_3D(4,8),#conv => BN => LeakyReLU
+            cnn_layer_3D(8,8),
+            cnn_layer_3D(8,8),
+            cnn_layer_3D(8,8),
+            cnn_layer_plain_3D(8, 3)
+        )
+        self.tanh_NL = nn.Tanh()
+    def forward(self,x,ray_depths):
+        B,C,nv,nu,H,W = x.shape
+        
+        ray_depths = ray_depths.unsqueeze(1) #B,1,v,u,H,W
+        x2 = torch.cat([x,ray_depths],dim = 1) #B,4,v,u,H,W
+        x2 = x2.reshape(B,C+1,nv*nu,H,W) #B,4,v*u,H,W
+        x2 = self.cnn_layers(x2) #B,3,v*u,H,W, after # A series of 3D convolution 
+        x2 = x2.reshape(B,C,nv,nu,H,W)
+        #x = (self.tanh_NL(x) + 1) / 2 #constrain the output range to [0,1], I dont think we need to do it. 
+        x = x + x2 #residual node
+        return x #Estimated LF, B,C,v,u,H,W
+    
+    
+class cnn_layer_3D(nn.Module):
+    '''((possibly dilated)conv => BN => LeakyReLU), following learning Local_light field synthesis paper, used in refineNet'''
+    def __init__(self, in_ch, out_ch,filter_size = 3, dialation_rate = 1):
+        super(cnn_layer_3D, self).__init__()
+        self.conv = nn.Sequential(
+            ReflectionPad3d(dialation_rate*(filter_size-1)//2),
+            nn.Conv3d(in_ch, out_ch, filter_size, padding=0,dilation = dialation_rate),
+            nn.BatchNorm3d(out_ch),
+            nn.LeakyReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+    
+class cnn_layer_plain_3D(nn.Module):
+    '''((possibly dilated)conv), following learning Local_light field synthesis paper, used in refineNet'''
+
+    def __init__(self, in_ch, out_ch,filter_size = 3, dialation_rate = 1):
+        super(cnn_layer_plain_3D, self).__init__()
+        self.conv = nn.Sequential(
+            ReflectionPad3d(dialation_rate*(filter_size-1)//2),
+            nn.Conv3d(in_ch, out_ch, filter_size, padding=0,dilation = dialation_rate)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+    
+class ReflectionPad3d(nn.Module):
+    """
+    My 3D padding, padding a tensor's last three dimension's each size by padding_size.
+    """
+    def __init__(self,padding_size):
+        super(ReflectionPad3d,self).__init__()
+        self.pad = (padding_size,padding_size,padding_size,padding_size,padding_size,padding_size)
+    def forward(self,x):
+        #return F.pad(x, self.pad, mode='reflect') this will raise none implement error
+        return F.pad(x, self.pad, mode='replicate') 

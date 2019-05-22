@@ -18,15 +18,21 @@ def show_FS(FS,isshow = True, **kwargs):
     if isshow:
         show(img_grid)
     return img_grid
-def show_SAI(LF,vu_pair_list, isshow = True, **kwargs):
+def show_SAI(LF,vu_pair_list = None, isshow = True, **kwargs):
     """
-    LF: C,nv,nu,H,W or B,C,nv,nu,H,W
-    uv_pair_list: [(v_1,u_1),(v_2,u_2)....]
+    LF: C,nv,nu,H,W or B,C,nv,nu,H,W or just a batch of SAI: B,C,H,W
+    uv_pair_list: [(v_1,u_1),(v_2,u_2)....], ignored in the case of a batch of SAI: B,C,H,W
     
     show number of SAI with angular location specified by uv_pair_list.
     """
     shape = LF.shape
-    if len(shape) == 5:
+    if len(shape) == 4:# case of a batch of SAI: 
+        LF = torch.unsqueeze(torch.unsqueeze(LF,2),3) #expand B,C,H,W into B,C,1,1,H,W
+        LF = LF.permute([0,2,3,1,4,5])
+        SAI_list = [LF[:,0,0]]
+        grids = [make_grid(list,padding = 30, nrow = 1,**kwargs) for list in SAI_list]
+        img_grid = torch.cat(grids,dim = 2)
+    elif len(shape) == 5:
         LF = LF.permute([1,2,0,3,4])
         SAI_list = [LF[vu_pair[0],vu_pair[1]] for vu_pair in vu_pair_list]
         img_grid = make_grid(SAI_list,padding = 30, **kwargs)
