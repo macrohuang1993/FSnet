@@ -240,16 +240,21 @@ class depth_network_pt(nn.Module):
         x:FS of shape B,C,nF,H,W
         lfsize: lightfield size (H,W,nv,nu)
         disp_mult: uplimit of the abs of the disparity. To be constrained by tanh
+        concat_SAI: whether concat SAI with FS along color channel for the depth estimation.
+        SAI_only: whether only use SAI for depth estimation (without use FS). When this is true, concat_SAI 
         
     Output:
         disparity field of shape B,nv,nu,H,W
     """
-    def __init__(self,nF, lfsize, disp_mult, concat_SAI = False):
+    def __init__(self,nF, lfsize, disp_mult, concat_SAI = False, SAI_only = False):
         super(depth_network_pt,self).__init__()
         self.v_sz,self.u_sz = lfsize[2],lfsize[3]
         self.disp_mult = disp_mult
         self.concat_SAI = concat_SAI
-        if concat_SAI:
+        self.SAI_only = SAI_only
+        if SAI_only:
+            C = 3 
+        elif concat_SAI:
             C = 3 * nF +3
         else:
             C = 3*nF
@@ -267,12 +272,15 @@ class depth_network_pt(nn.Module):
         )
         self.tanh_NL = nn.Tanh()
     def forward(self,x, *args):
-        B,C,nF,H,W = x.shape
-        x = x.reshape(B,C*nF,H,W)
+        if self.SAI_only:
+            B,C,H,W = x.shape #input x is the SAI
+        else:
+            B,C,nF,H,W = x.shape #input x is the FS
+            x = x.reshape(B,C*nF,H,W)
         if len(args) == 0:
             pass
         else:
-            assert len(args) == 1 and len(args[0].shape) == 4 ## check it is one 4D tensor (All in focus image)
+            assert len(args) == 1 and self.concat_SAI and len(args[0].shape) == 4 ## check it is one 4D tensor (All in focus image)
             SAI = args[0]
             x = torch.cat([x,SAI], dim = 1) #concatenate FS and SAI along color channel
         x = self.cnn_layers(x) # A series of convolution (some dilated)
