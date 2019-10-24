@@ -200,7 +200,7 @@ class unet_FS2LF_v3(nn.Module):
 #to do https://pytorch.org/tutorials/beginner/data_loading_tutorial.html
         
         
-        
+
 class unet_FS2SAI_v3(nn.Module):
     def __init__(self,nF=None,nu=None,nv=None,C=3, box_constraint = None):
         super(unet_FS2SAI_v3,self).__init__()

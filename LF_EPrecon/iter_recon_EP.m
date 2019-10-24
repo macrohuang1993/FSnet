@@ -8,7 +8,7 @@ import utilities.*
 %% Setting here
 LF_datapath = 'LF_LDs_matrecon.h5';
 FS_datapath = 'FS_LDs_matrecon.h5';
-save_folder = 'EP_hyperparameter_search';
+save_folder = 'EP_hyperparameter_search_newrun';
 N_val = 100; % number of val sample to validate. (<= numel(name_list))
 %% Camara setting and Generate model Matrix
 f=100; %(mm) 
@@ -44,7 +44,7 @@ niterTV = 30;
 %alphaTV = logspace(5,7,20);%1e4, 2.5e4, 5e4, 7.5e4, reg strength parameter.
 %deltaTV = logspace(-2,1,20);%1e-2, 1e-3, 1e-4; sharpness of transition from hyperbola to L1loss, small means sharp.
 %config=combvec(alphaTV,deltaTV);
-config = [1e6;1e-1];%[1.6e5;3.8e-1];
+config = [1.6e5;3.8e-1];%[1.6e5;3.8e-1];
 [~,Nconfig]=size(config);
 
 info_all = cell(3*N_val,Nconfig);% Each column is the info (of one config) for r,g,b channel of each sample, 
